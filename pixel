@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+
+import sys
+from PIL import Image
+import os
+import re
+import shutil
+import json
+import math
+import hashlib
+
+target = sys.argv[1] if len(sys.argv) > 1 else "."
+
+datadir = target + os.sep + "pixel" + os.sep
+if not os.path.isdir(datadir):
+    os.mkdir(datadir)
+if not os.path.isdir(datadir + "thumbnails"):
+    os.mkdir(datadir + "thumbnails")
+if not os.path.isdir(datadir + "images"):
+    os.mkdir(datadir + "images")
+
+imgList = [];
+files = [
+    f.strip() for f in [
+        os.path.join(target, f) for f in os.listdir(target) if os.path.isfile(os.path.join(target, f))
+    ]
+]
+for i, imageFile in enumerate(files):
+    print('{}/{} {}'.format(i, len(files), imageFile.strip()), end='\r'),
+    try:
+        im = Image.open(imageFile.strip())
+
+        exif = im.getexif()
+        if exif:
+            orientation = exif[0x0112] if 0x0112 in exif else 1
+            datetime = exif[0x9003] if 0x9003 in exif else os.path.getmtime(imageFile.strip())
+        else:
+            orientation = 1
+            datetime = os.path.getmtime(imageFile.strip())
+
+        if orientation == 8:
+            im = im.rotate(90, resample=Image.BICUBIC)
+        if orientation == 6:
+            im = im.rotate(-90, resample=Image.BICUBIC)
+        if orientation == 3:
+            im = im.rotate(180, resample=Image.BICUBIC)
+
+        stringId = "{},{},{},{},{}".format(
+            imageFile.strip(),
+            im.size[0],
+            im.size[1],
+            orientation,
+            datetime
+        )
+        hashId = hashlib.sha256(str.encode(stringId)).hexdigest();
+
+        thumbnailPath = datadir + "thumbnails" + os.sep + hashId + ".jpg"
+        imagePath = datadir + "images" + os.sep + hashId + ".jpg"
+
+        imgList.append({
+            "image": "pixel/images/{}.jpg".format(hashId),
+            "thumbnail": "pixel/thumbnails/{}.jpg".format(hashId),
+            "datetime": datetime
+        });
+
+        if os.path.isfile(thumbnailPath) and os.path.isfile(imagePath):
+            continue
+
+        im.thumbnail((1366, 768))
+
+        if not os.path.isfile(imagePath):
+            im.save(datadir + "images" + os.sep + hashId + ".jpg", optimize=True, quality=87)
+
+        if not os.path.isfile(thumbnailPath):
+            size = 300
+            ratio = min(im.size[0]/size, im.size[1]/size)
+            im2 = im.resize((math.floor(im.size[0]/ratio), math.floor(im.size[1]/ratio)), Image.BICUBIC)
+            center = (math.floor(im2.size[0]/2), math.floor(im2.size[1]/2))
+            im2 = im2.crop((
+                center[0]-math.floor(size/2),
+                center[1]-math.floor(size/2),
+                center[0]+math.floor(size/2),
+                center[1]+math.floor(size/2)
+            ))
+            im2.save(datadir + "thumbnails" + os.sep + hashId + ".jpg", optimize=True, quality=65)
+
+    except IOError:
+        continue
+
+with open(target + os.sep + 'list.json', 'w') as jsonFile:
+    print(json.dumps(sorted(imgList, key=lambda x: x["datetime"])), file=jsonFile)
+
+with open(target + os.sep + 'index.html', 'w') as htmlFile:
+    print("""\
+<html>
+    <head>
+        <meta charset="utf8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+        <style>
+            .item {
+                display: inline-block;
+                position: relative;
+                background: lightgrey;
+            }
+            .big {
+                display: block;
+                position: absolute;
+                z-index: 1;
+                background: darkgrey;
+            }
+            .image-container {
+                overflow: hidden;
+            }
+            .thumbnail {
+                transform: translate(-50%, -50%);
+                position: relative;
+                top: 50%;
+                left: 50%;
+                min-width: 100%;
+                min-height: 100%;
+                max-width: 200%;
+            }
+        </style>
+        <link href="https://cdn.jsdelivr.net/gh/fancyapps/fancybox@3.5.7/dist/jquery.fancybox.min.css" rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/jquery@3.4.1/dist/jquery.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/gh/fancyapps/fancybox@3.5.7/dist/jquery.fancybox.min.js"></script>
+    </head>
+    <body>
+        <div id="container"></div>
+        <script>
+            function createGrid(images, container) {
+                // reset container;
+                container.innerHTML = "";
+                // our pseudo-random function is deterministic to create the same grid every time
+                let seed = 8;
+                let rd = (max) => { seed++; return Math.pow(seed, 7)%max; }
+                // calculate a good number of columns
+                let c = Math.floor(container.scrollWidth / 150) + 1;
+                let gutter = 5; // size of gutter in px
+                container.style.paddingLeft = gutter + "px";
+                container.style.paddingTop = gutter + "px";
+                container.boxSizing = "border-box";
+                let items = {};
+                let numberOfImages = images.length;
+                let imageContainers = {};
+                // calculate numberOfBigC to make a beautiful grid
+                let n = numberOfImages;
+                let numberOfBigC = Math.max(0, Math.floor(Math.log10(2*c)*n/6) - 1);
+                n += 3*numberOfBigC;
+                let itemList = [];
+                for(i = 0; i < n; i++) {
+                    let item = document.createElement("DIV");
+                    item.classList.add("item");
+                    itemList.push(item);
+                    item.style.marginRight = gutter + "px";
+                    item.style.marginBottom = gutter + "px";
+                    item.dataset.i = i;
+                    // create an item list for the bigCs coming later
+                    // but don't add end of line items and two last row items
+                    if (i % c !== c-1 && i < n - (c - n%c) - c) {
+                        items[i] = item;
+                    }
+                    // create an item list for the imageContainers
+                    imageContainers[i] = item;
+                    container.appendChild(item);
+                }
+                let bigItemList = [];
+                for(j = 0; j < numberOfBigC; j++) {
+                    // "randomly" choose an item to use as starting point
+                    let rand = rd(Object.keys(items).length);
+                    let id = Object.keys(items)[rand];
+                    id = parseInt(id); // assure that id is treated as a number;
+                    let parent = items[id];
+                    // add the bigC to the item
+                    let bigC = document.createElement("DIV");
+                    bigC.classList.add("big");
+                    parent.appendChild(bigC);
+                    bigItemList.push(bigC);
+                    // remove items not suitable for a bigC or for containing an image anymore
+                    delete items[id];
+                    delete items[id - 1];
+                    delete items[id + 1];
+                    delete items[id - c - 1];
+                    delete items[id - c + 1];
+                    delete items[id - c];
+                    delete items[id + c];
+                    delete items[id + c - 1];
+                    delete items[id + c + 1];
+                    delete imageContainers[id];
+                    delete imageContainers[id + 1];
+                    delete imageContainers[id + c];
+                    delete imageContainers[id + c + 1];
+                    // add the bigC to the imageContainers
+                    imageContainers[id] = bigC;
+                }
+                // set images inside imageContainers
+                i = 0;
+                Object.keys(imageContainers).forEach(id => {
+                    let link = document.createElement("A");
+                    link.dataset.fancybox = "gallery";
+                    link.href = images[i].image;
+                    let img = document.createElement("IMG");
+                    img.dataset.src = images[i].thumbnail || images[i].image; //lazyload
+                    img.classList.add("thumbnail");
+                    imageContainers[id].classList.add("image-container");
+                    link.appendChild(img);
+                    imageContainers[id].appendChild(link);
+                    i++;
+                });
+                setTimeout(() => {
+                    // calculate the width of an element
+                    let w = Math.floor((container.clientWidth - (1+c)*gutter)/c - 2);
+                    for(i = 0; i < itemList.length; i++) {
+                        itemList[i].style.width = w + "px";
+                        itemList[i].style.height = w + "px";
+                    }
+                    for(i = 0; i < bigItemList.length; i++) {
+                        bigItemList[i].style.width = (w*2 + gutter) + "px";
+                        bigItemList[i].style.height = (w*2 + gutter) + "px";
+                    }
+                    // start loading images
+                    window.dispatchEvent(new Event("scroll"));
+                }, 100);
+                window.addEventListener("scroll", () => {
+                    let imgs = document.getElementsByClassName("thumbnail");
+                    for(let i = 0; i < imgs.length; i++) {
+                        if (
+                            imgs[i].getClientRects()[0].top < (window.innerHeight + 500)
+                            && !imgs[i].src
+                        ) {
+                            imgs[i].src = imgs[i].dataset.src;
+                        }
+                    }
+                });
+            }
+            let imageList = [];
+            // fetch the list of images and thumbnails
+            fetch("list.json").then(response => {
+                response.json().then(imgs => {
+                    imageList = imgs;
+                    createGrid(imgs, document.getElementById("container"));
+                });
+            });
+            // recreate grid on window width resize
+            previousWidth = window.innerWidth;
+            window.addEventListener("resize", () => {
+                if (window.innerWidth !== previousWidth) {
+                    previousWidth = window.innerWidth;
+                    createGrid(imageList, document.getElementById("container"));
+                }
+            });
+        </script>
+    </body>
+</html>\
+""", file=htmlFile);
