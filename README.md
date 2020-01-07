@@ -1,7 +1,7 @@
 Pixel
 =====
 
-![album made with pixel](screenshot.png)
+![album made with pixel](screenshot.jpg)
 
 Pixel is a small script intended to create photo albums to upload on your server.
 
