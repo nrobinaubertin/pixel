@@ -19,7 +19,7 @@ Then, just point the script towards the directory where you store the photos you
 ./pixel /path/to/photo/album
 ```
 
-Pixel will create an `index.html` file and a `pixel` directory inside the targeted directory. These contain the files that make up the album. The source photos are not needed anymore.  
+Pixel will create the `index.html` and `list.json` files and a `pixel` directory inside the targeted directory. These contain the files that make up the album. The source photos are not needed anymore.  
 Example album created from [an unsplash collection](https://unsplash.com/collections/181581/animals): [https://niels.fr/demo/pixel](https://niels.fr/demo/pixel)
 
 ## Remarks
